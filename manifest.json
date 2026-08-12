@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "ky.jellyfin-nowplaying",
   "name": "Jellyfin Now Playing",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "Kyrunner",
   "license": "MIT",
   "description": "Who is watching Jellyfin, and whether the server is transcoding for them. Read-only.",

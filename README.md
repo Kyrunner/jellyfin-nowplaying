@@ -6,6 +6,11 @@ controls playback.
 Quiet when the server is reachable and nobody is watching. A *fault* stays visible and worded, because a
 hidden widget and a broken widget must not look the same.
 
+"Not yet" is not a fault. The bar starts about ten seconds before WiFi associates, so the first poll of every
+boot fails. While a poll is failing the widget retries every **5s** and says nothing; it reports a fault only
+after **45s of continuous failure**, and one success resets that clock. So a boot is quiet, a network blip is
+quiet, and a genuinely dead server still speaks up within a minute.
+
 ## Configure
 
 `~/.config/omarchy-jellyfin/config.json`, mode 600:
@@ -70,9 +75,20 @@ Expected shapes:
 
 ```
 {"ok":true,"error":null,"streams":[…]}          # streams: [] when nobody is watching
-{"ok":false,"error":"not configured", …}        # exit 1
-{"ok":false,"error":"auth failed", …}           # exit 1
+{"ok":false,"error":"not configured", …}        # exit 1 — no config file
+{"ok":false,"error":"bad config", …}            # exit 1 — file unreadable, or url/token missing
+{"ok":false,"error":"auth failed", …}           # exit 1 — the server rejected the token
 {"ok":false,"error":"unreachable", …}           # exit 1
+```
+
+`bad config` and `auth failed` are kept strictly apart. A config mistake reported as an auth failure sends you
+to Dashboard → API Keys, where everything looks correct, while the real fault goes unnamed.
+
+The two suites run with no server and no credentials:
+
+```bash
+node Readiness.test.js          # the grace-window decision table
+bash backend-config.test.sh     # config parsing, against a stub Jellyfin on localhost
 ```
 
 ## Requirements
@@ -103,8 +119,11 @@ one-click action with no side effects.
 | `manifest.json` | Identity, `bar-widget` kind, `refreshIntervalSec` setting |
 | `backend.sh` | Config + curl + HTTP status handling. The only thing that talks to Jellyfin |
 | `flatten.py` | Turns `/Sessions` into one flat line. Separate file **on purpose** — a bash heredoc and piped stdin cannot coexist, and it makes the transform testable against a fixture |
-| `JellyfinService.qml` | Poll timer, `Process`, parsed state. No layout |
+| `JellyfinService.qml` | Poll cadence, `Process`, parsed state. No layout |
 | `Panel.qml` | Bar button + popout. Presentation only |
+| `Readiness.qml` / `.js` | When to poll, and when a failure is old enough to be worth showing. The logic is a pure function so it can be tested without a bar or a reboot |
+| `Readiness.test.js` | `node Readiness.test.js` — the grace-window decision table |
+| `backend-config.test.sh` | `bash backend-config.test.sh` — config parsing against a stub server |
 
 ## Notes
 
@@ -113,3 +132,6 @@ one-click action with no side effects.
   `MediaStream` instead.
 - Colours come from Omarchy's own theme objects, so it follows theme switches with nothing to maintain.
 - A failed poll keeps the last known streams and marks them stale rather than blanking.
+- The 45s grace window is measured as real elapsed time, accumulated one poll at a time and sanity-checked
+  against the delay actually scheduled. It has to be: `systemd-timesyncd` makes its first correction inside
+  that very window, and a suspend moves the clock by hours.

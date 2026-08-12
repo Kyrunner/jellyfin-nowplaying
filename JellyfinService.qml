@@ -15,6 +15,13 @@ Item {
   property var streams: []
   property bool stale: false          // last poll failed but we still have old data
 
+  // True only once a failure has persisted past the grace window, or when the
+  // problem is a configuration one, which is never transient. Panels render
+  // errors from this, not from !ok, so a cold boot stays quiet.
+  readonly property bool faulted: readiness.faulted
+                                  || svc.error === "not configured"
+                                  || svc.error === "bad config"
+
   // Seconds since the last AUTHORITATIVE poll. The panel adds this to a stream's
   // position_sec so the readout advances every second instead of jumping by
   // refreshIntervalSec (10 s by default) — the poll stays the source of truth and
@@ -38,15 +45,21 @@ Item {
     stdout: StdioCollector {
       onStreamFinished: {
         var raw = this.text ? this.text.trim() : ""
-        if (raw === "") { svc.stale = svc.count > 0; svc.ok = false; svc.error = "no output"; return }
+        if (raw === "") { svc.stale = svc.count > 0; svc.ok = false; svc.error = "no output"; readiness.failed(); return }
         try {
           var d = JSON.parse(raw)
           svc.ok = !!d.ok
           svc.error = d.error ? String(d.error) : ""
-          if (d.ok) { svc.streams = d.streams || []; svc.stale = false; svc.tick = 0 }
-          else { svc.stale = svc.count > 0 }   // keep last-known, mark it stale
+          if (d.ok) {
+            svc.streams = d.streams || []; svc.stale = false; svc.tick = 0
+            readiness.succeeded()
+          } else {
+            svc.stale = svc.count > 0   // keep last-known, mark it stale
+            readiness.failed()
+          }
         } catch (e) {
           svc.ok = false; svc.error = "unparseable"; svc.stale = svc.count > 0
+          readiness.failed()
         }
       }
     }
@@ -54,12 +67,13 @@ Item {
 
   function refresh() { if (!poll.running) poll.running = true }
 
-  Timer {
-    interval: Math.max(5, svc.refreshIntervalSec) * 1000
-    running: true
-    repeat: true
-    triggeredOnStart: true
-    onTriggered: svc.refresh()
+  // Owns the poll cadence. While a poll is failing it retries faster than the
+  // configured interval and stays silent, so the ~10s between the bar appearing
+  // and WiFi associating does not render as a fault. See Readiness.qml.
+  Readiness {
+    id: readiness
+    refreshIntervalSec: Math.max(5, svc.refreshIntervalSec)
+    onPoll: svc.refresh()
   }
 
   // 1 Hz clock for the live position. Deliberately gated on `count > 0` so an idle

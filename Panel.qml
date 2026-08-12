@@ -20,7 +20,13 @@ Panel {
   // never appears. Learned from taildrop, the minimal working reference on this box.
   // Idle -> zero width, which is how "quiet when nobody is watching" is honestly
   // expressed; a FAULT keeps its width so broken never looks like idle.
-  implicitWidth: (jf.ok && jf.count === 0) ? 0 : button.implicitWidth
+  // Zero width hides the pill. Two ways to have nothing worth showing: a healthy
+  // server with nothing playing, and a poll that has failed but is not yet a
+  // fault — the boot case. A widget still holding streams keeps showing them,
+  // marked stale, rather than vanishing mid-session while one poll is in doubt.
+  implicitWidth: (jf.ok && jf.count === 0)
+                 || (!jf.ok && !jf.faulted && jf.count === 0)
+                 ? 0 : button.implicitWidth
   implicitHeight: button.implicitHeight
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
@@ -133,10 +139,26 @@ Panel {
           // Fault state, worded
           Text {
             Layout.fillWidth: true
-            visible: !jf.ok
+            visible: jf.faulted
             text: "Not available — " + jf.error + (jf.stale ? " (showing last known)" : "")
             color: root.urgent
             font.family: root.fontFamily
+            wrapMode: Text.WordWrap
+          }
+
+          // Both config faults get a next step. "bad config" means the file is
+          // there but unusable, which is a different fix from "write one".
+          Text {
+            Layout.fillWidth: true
+            visible: jf.faulted
+                     && (jf.error === "not configured" || jf.error === "bad config")
+            text: jf.error === "not configured"
+                  ? "Create ~/.config/omarchy-jellyfin/config.json with url and token."
+                  : "~/.config/omarchy-jellyfin/config.json needs a url and a token. "
+                    + "The field names must be exactly that — replace only the values."
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
             wrapMode: Text.WordWrap
           }
 
