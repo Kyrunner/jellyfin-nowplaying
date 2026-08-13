@@ -172,10 +172,41 @@ Panel {
 
           Repeater {
             model: jf.streams
-            delegate: ColumnLayout {
+            delegate: RowLayout {
+              id: streamRow
               required property var modelData
               Layout.fillWidth: true
-              spacing: Style.space(3)
+              spacing: Style.space(10)
+
+              // Series poster for episodes, the item's own for films — chosen by the
+              // backend, which is where Jellyfin knowledge lives. Absent for content
+              // with no artwork (some music, some live), and the thumbnail collapses
+              // to zero width rather than showing a broken-image box.
+              //
+              // Jellyfin serves these unauthenticated, so no credential rides in the
+              // URL. asynchronous:true keeps a slow server from stalling the panel's
+              // first paint; the layout is already sized, so nothing reflows when it
+              // lands.
+              // Structure copied verbatim from ky.seerr-requests, which is the working
+              // reference for a remote Image in this shell. Do NOT gate `visible` on
+              // `status === Image.Ready`: an Image that starts invisible at zero layout
+              // width never gets driven to load, so the status it is waiting for never
+              // arrives and the poster silently never appears.
+              Image {
+                Layout.alignment: Qt.AlignTop
+                visible: !!modelData.poster_url
+                source: modelData.poster_url || ""
+                sourceSize.width: Style.space(120)  // 2x the slot: stays crisp on HiDPI
+                Layout.preferredWidth: Style.space(60)
+                Layout.preferredHeight: Style.space(90)   // posters are 2:3
+                fillMode: Image.PreserveAspectFit
+                smooth: true
+                asynchronous: true                  // never let a slow server stall the panel
+              }
+
+              ColumnLayout {
+                Layout.fillWidth: true
+                spacing: Style.space(3)
 
               // Click the title to open the item in Jellyfin. The URL is built by the
               // backend, so QML never needs to know the server address or the route.
@@ -270,7 +301,123 @@ Panel {
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
               }
+
+              // Transport, per SESSION — Jellyfin routes commands to the client that
+              // is playing, so two devices watching the same film are two independent
+              // remotes. Disabled with a stated reason when the client cannot be
+              // controlled, rather than hidden: a missing row reads as a bug.
+              RowLayout {
+                Layout.fillWidth: true
+                Layout.topMargin: Style.space(2)
+                spacing: Style.space(2)
+
+                readonly property bool live: modelData.controllable && jf.busyKey === ""
+                readonly property string why: modelData.control_error || "Nothing playing"
+
+                PanelActionButton {
+                  iconText: "󰒮"
+                  tooltipText: modelData.controllable ? "Previous" : parent.why
+                  foreground: modelData.controllable ? root.dim : Qt.darker(root.dim, 1.6)
+                  hoverColor: root.urgent
+                  enabled: parent.live
+                  onClicked: jf.control(modelData.session_id, "previous")
+                }
+                PanelActionButton {
+                  // Plain text, not a glyph: the nf-md rewind-30 codepoint is not
+                  // verified present in this bar's font, and a missing glyph renders
+                  // as tofu with no way to tell from here.
+                  iconText: "−30"
+                  tooltipText: modelData.can_seek ? "Back 30s" : "This client cannot seek"
+                  foreground: (modelData.controllable && modelData.can_seek) ? root.dim : Qt.darker(root.dim, 1.6)
+                  hoverColor: root.urgent
+                  enabled: parent.live && modelData.can_seek
+                  onClicked: jf.control(modelData.session_id, "back30")
+                }
+                PanelActionButton {
+                  iconText: modelData.paused ? "󰐊" : "󰏤"
+                  tooltipText: modelData.controllable ? (modelData.paused ? "Play" : "Pause") : parent.why
+                  foreground: modelData.controllable ? root.foreground : Qt.darker(root.dim, 1.6)
+                  hoverColor: root.urgent
+                  enabled: parent.live
+                  onClicked: jf.control(modelData.session_id, "playpause")
+                }
+                PanelActionButton {
+                  iconText: "+30"
+                  tooltipText: modelData.can_seek ? "Forward 30s" : "This client cannot seek"
+                  foreground: (modelData.controllable && modelData.can_seek) ? root.dim : Qt.darker(root.dim, 1.6)
+                  hoverColor: root.urgent
+                  enabled: parent.live && modelData.can_seek
+                  onClicked: jf.control(modelData.session_id, "fwd30")
+                }
+                PanelActionButton {
+                  iconText: "󰒭"
+                  tooltipText: modelData.controllable ? "Next" : parent.why
+                  foreground: modelData.controllable ? root.dim : Qt.darker(root.dim, 1.6)
+                  hoverColor: root.urgent
+                  enabled: parent.live
+                  onClicked: jf.control(modelData.session_id, "next")
+                }
+                PanelActionButton {
+                  iconText: "󰓛"
+                  tooltipText: modelData.controllable ? "Stop" : parent.why
+                  foreground: modelData.controllable ? root.dim : Qt.darker(root.dim, 1.6)
+                  hoverColor: root.urgent
+                  enabled: parent.live
+                  onClicked: jf.control(modelData.session_id, "stop")
+                }
+
+                Item { Layout.fillWidth: true }
+
+                PanelActionButton {
+                  iconText: "󰝟"
+                  tooltipText: modelData.controllable ? "Toggle mute" : parent.why
+                  foreground: modelData.controllable ? root.dim : Qt.darker(root.dim, 1.6)
+                  hoverColor: root.urgent
+                  enabled: parent.live
+                  onClicked: jf.control(modelData.session_id, "mute")
+                }
+                PanelActionButton {
+                  iconText: "󰝞"
+                  tooltipText: modelData.controllable ? "Volume down" : parent.why
+                  foreground: modelData.controllable ? root.dim : Qt.darker(root.dim, 1.6)
+                  hoverColor: root.urgent
+                  enabled: parent.live
+                  onClicked: jf.control(modelData.session_id, "voldown")
+                }
+                PanelActionButton {
+                  iconText: "󰝝"
+                  tooltipText: modelData.controllable ? "Volume up" : parent.why
+                  foreground: modelData.controllable ? root.dim : Qt.darker(root.dim, 1.6)
+                  hoverColor: root.urgent
+                  enabled: parent.live
+                  onClicked: jf.control(modelData.session_id, "volup")
+                }
+              }
+
+              // Why the buttons are dead, stated rather than left to be guessed.
+              Text {
+                Layout.fillWidth: true
+                visible: !modelData.controllable
+                text: modelData.control_error
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                wrapMode: Text.WordWrap
+              }
+              }
             }
+          }
+
+          // A failed command, named. Sits below the streams so one message covers
+          // whichever session it came from.
+          Text {
+            Layout.fillWidth: true
+            visible: jf.actionError !== ""
+            text: "Command failed — " + jf.actionError
+            color: root.urgent
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
           }
         }
       }

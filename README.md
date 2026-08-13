@@ -125,11 +125,69 @@ one-click action with no side effects.
 | `Readiness.test.js` | `node Readiness.test.js` — the grace-window decision table |
 | `backend-config.test.sh` | `bash backend-config.test.sh` — config parsing against a stub server |
 
+## Transport controls
+
+Each stream gets its own row: previous, −30s, play/pause, +30s, next, stop, and
+mute/volume down/up.
+
+Controls target the **session**, not the item. Jellyfin routes commands to the client that is
+playing, so two devices watching the same film are two independent remotes — which is why the
+buttons sit per-stream rather than once at the bottom.
+
+- **`controllable` requires BOTH `SupportsRemoteControl` and `SupportsMediaControl`.** They cover
+  different routes (`/Command` and `/Playing` respectively) and a client can advertise one without
+  the other. When false the buttons grey out and the panel names the client that cannot be driven,
+  rather than leaving a dead row to be guessed at.
+- **Seek is absolute-only on Jellyfin**, so `control.py` reads a fresh `PositionTicks` and computes
+  the target itself instead of trusting the panel's number, which is up to one poll interval stale.
+  It clamps to just short of the runtime: seeking past the end makes a client stop dead rather than
+  advance.
+- **Transport and general commands are different routes.** `POST /Sessions/<id>/Playing/<verb>` for
+  PlayPause/Stop/NextTrack/PreviousTrack/Seek, `POST /Sessions/<id>/Command/<verb>` for
+  VolumeUp/VolumeDown/ToggleMute. Sending one to the other's path 404s.
+- **Commands never report their own result.** The next poll is the authority — a pause the client
+  refused must not render as paused just because it was asked for. The confirming poll is deferred
+  400ms, because the client ACKs through Jellyfin before it has applied anything.
+
+Verified against a Kodi client on 2026-08-13: play/pause both directions, ±30s seek accurate to the
+second, and volume audible through HDMI-CEC to an AV receiver.
+
+```bash
+./backend.sh control <session_id> playpause   # next previous stop back30 fwd30 volup voldown mute
+```
+
+## Poster artwork
+
+Each stream shows a poster: the **series** poster for an episode, the item's own `Primary` for a
+film. A series poster is what "poster artwork" means for TV — tall, recognisable, identical across a
+season — whereas an episode's own `Primary` is a still frame from that episode, often a dark or
+ambiguous one. Content with no artwork simply shows no thumbnail.
+
+Two decisions worth keeping:
+
+- **No credential is attached to the image URL.** Jellyfin serves `/Items/<id>/Images/*`
+  unauthenticated, which is what makes it safe to hand the URL straight to QML's `Image`. Appending
+  `api_key=` would work too, and would put a live token into QML and into anything that logs it.
+- **Posters load over the LAN `url`, not `web_base`.** `backend.sh` passes both: `web_base` builds
+  the click-through link that must work from anywhere, `url` builds the poster link. Otherwise every
+  poll would drag artwork through the public edge to display it at home.
+
+`maxHeight=180` makes Jellyfin serve a ~20KB scaled copy instead of the full-size original, and it
+caches the scaled version after the first request. The image `tag` is in the URL so a changed poster
+busts the cache.
+
+> **Editing `Panel.qml` requires `omarchy-restart-shell`.** Plugin hot-reload picks up `backend.sh`
+> and the Python helpers, but keeps serving a cached compile of the QML — the edit appears to do
+> nothing, and errors report against line numbers from the old file.
+
 ## Notes
 
 - **`TranscodingInfo` only appears while Jellyfin is actually transcoding**, so its presence *is* the
   transcode signal — no inferring from codec names. On direct play the bitrate is read from the video
   `MediaStream` instead.
+- **Do not gate the poster's `visible` on `status === Image.Ready`.** An `Image` that starts invisible
+  at zero layout width is never driven to load, so the status it waits for never arrives and the
+  poster silently never appears — with nothing in the logs.
 - Colours come from Omarchy's own theme objects, so it follows theme switches with nothing to maintain.
 - A failed poll keeps the last known streams and marks them stale rather than blanking.
 - The 45s grace window is measured as real elapsed time, accumulated one poll at a time and sanity-checked

@@ -2,19 +2,25 @@
   "schemaVersion": 1,
   "id": "ky.jellyfin-nowplaying",
   "name": "Jellyfin Now Playing",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "Kyrunner",
   "license": "MIT",
-  "description": "Who is watching Jellyfin, and whether the server is transcoding for them. Read-only.",
-  "kinds": ["bar-widget"],
-  "entryPoints": { "barWidget": "Panel.qml" },
+  "description": "What is playing on Jellyfin, with poster artwork, transport controls, and whether the server is transcoding.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
   "barWidget": {
     "displayName": "Jellyfin",
-    "description": "Shows active Jellyfin streams with viewer, device, progress, bitrate, and a direct-play vs transcode badge. Read-only; never controls playback.",
+    "description": "Shows active Jellyfin streams with poster art, viewer, device, progress, bitrate, and a direct-play vs transcode badge — with play/pause, 30s seek, skip, stop and volume for clients that allow remote control.",
     "category": "Media",
     "allowMultiple": false,
     "defaultSection": "right",
-    "defaults": { "refreshIntervalSec": 10 },
+    "defaults": {
+      "refreshIntervalSec": 10
+    },
     "schema": [
       {
         "key": "refreshIntervalSec",

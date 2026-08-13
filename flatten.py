@@ -10,6 +10,50 @@ import json,sys
 # argv[1] = Jellyfin base URL, so the link is built where Jellyfin knowledge already
 # lives (this script) rather than in QML. Jellyfin 10.11 route: /web/#/details?id=…
 BASE = (sys.argv[1].rstrip('/') if len(sys.argv) > 1 else '')
+# argv[2] = the API endpoint (LAN). Posters are fetched by QML's Image directly, and
+# they should not cross the public edge to do it. Falls back to BASE when unset so an
+# older backend.sh keeps working.
+API_BASE = (sys.argv[2].rstrip('/') if len(sys.argv) > 2 and sys.argv[2] else BASE)
+
+# 180px tall is ~2x the rendered thumbnail on a HiDPI bar. Asking Jellyfin to resize
+# means ~12KB per poster instead of a multi-megabyte original, and Jellyfin caches
+# the scaled copy after the first request.
+POSTER_MAX_HEIGHT = 180
+
+
+def poster_url(npi):
+    """Series poster for an episode, the item's own Primary otherwise.
+
+    A series poster is what "poster artwork" means for TV: tall, recognisable, and
+    identical across a season. An episode's own Primary is a still frame from that
+    episode -- often a dark or ambiguous one -- so it is only used when there is no
+    series behind it.
+
+    No credential is attached. Jellyfin serves /Items/<id>/Images/* unauthenticated,
+    which is what makes it safe to hand this straight to QML's Image; adding an
+    api_key here would put a working token into QML and into anything logging it.
+
+    The `tag` is the image's content hash. Without it a changed poster keeps serving
+    from cache; with it the URL changes when the artwork does.
+    """
+    if not API_BASE:
+        return None
+
+    series_id = npi.get("SeriesId")
+    series_tag = npi.get("SeriesPrimaryImageTag")
+    if npi.get("Type") == "Episode" and series_id and series_tag:
+        return (f"{API_BASE}/Items/{series_id}/Images/Primary"
+                f"?tag={series_tag}&maxHeight={POSTER_MAX_HEIGHT}")
+
+    item_id = npi.get("Id")
+    own_tag = (npi.get("ImageTags") or {}).get("Primary")
+    if item_id and own_tag:
+        return (f"{API_BASE}/Items/{item_id}/Images/Primary"
+                f"?tag={own_tag}&maxHeight={POSTER_MAX_HEIGHT}")
+
+    # Music and some live content genuinely have no artwork. The panel hides the
+    # thumbnail rather than showing a broken-image box.
+    return None
 try:
     sessions=json.load(sys.stdin)
     if not isinstance(sessions,list): raise ValueError
@@ -56,6 +100,20 @@ for s in sessions:
       "video_label": None,
       "video_range": None,
       "item_id": npi.get("Id"),
+      "poster_url": poster_url(npi),
+      # Transport targets the SESSION, not the item: Jellyfin routes commands to the
+      # client that is playing, so the same film on two devices is two controllable
+      # things. Mirrors how ky.navidrome-remote keys control by player.
+      "session_id": s.get("Id"),
+      # Both flags are required. SupportsRemoteControl covers the /Command route,
+      # SupportsMediaControl the /Playing one, and a client can advertise one without
+      # the other — a web dashboard being the obvious case.
+      "controllable": bool(s.get("SupportsRemoteControl")) and bool(s.get("SupportsMediaControl")),
+      "can_seek": bool(ps.get("CanSeek")),
+      "control_error": (
+          "" if (s.get("SupportsRemoteControl") and s.get("SupportsMediaControl"))
+          else "%s cannot be controlled remotely" % (s.get("Client") or "this client")
+      ),
       "web_url": (f"{BASE}/web/#/details?id={npi.get('Id')}&serverId={npi.get('ServerId')}"
                   if BASE and npi.get("Id") else None),
     }

@@ -65,7 +65,45 @@ Item {
     }
   }
 
+  // Set while a command is in flight so every button disables at once, rather than
+  // letting a second click race the first.
+  property string busyKey: ""
+  property string actionError: ""
+
+  Process {
+    id: action
+    running: false
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var raw = this.text ? this.text.trim() : ""
+        var good = false, msg = "failed"
+        try { var d = JSON.parse(raw); good = !!d.ok; msg = d.error || "failed" } catch (e) {}
+        svc.actionError = good ? "" : String(msg)
+        svc.busyKey = ""
+        settle.restart()
+      }
+    }
+  }
+
+  // Deferred, not immediate: the client ACKs through Jellyfin before it has applied
+  // the command, so polling straight away reads the PRE-command state and the panel
+  // flips a beat later. Same lag the Kodi widget accounts for.
+  Timer {
+    id: settle
+    interval: 400
+    repeat: false
+    onTriggered: svc.refresh()
+  }
+
   function refresh() { if (!poll.running) poll.running = true }
+
+  function control(sessionId, act) {
+    if (action.running || busyKey !== "" || !sessionId) return
+    busyKey = sessionId + "/" + act
+    actionError = ""
+    action.command = ["bash", pluginDir + "/backend.sh", "control", String(sessionId), String(act)]
+    action.running = true
+  }
 
   // Owns the poll cadence. While a poll is failing it retries faster than the
   // configured interval and stays silent, so the ~10s between the bar appearing

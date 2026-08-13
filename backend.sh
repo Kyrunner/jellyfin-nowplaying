@@ -17,6 +17,17 @@ fail() { printf '{"ok":false,"error":"%s","streams":[]}\n' "$1"; exit 1; }
 
 [ -r "$CFG" ] || fail "not configured"
 
+# Transport is a separate entry point so the poll path stays exactly as it was: the
+# widget polls thousands of times a day and controls a handful of times, and a shared
+# code path would make every poll carry the command plumbing. The token reaches the
+# helper through the config file PATH, never argv, so it stays out of `ps`.
+if [ "${1:-poll}" = "control" ]; then
+  [ $# -eq 3 ] || { printf '{"ok":false,"error":"usage: control <session_id> <action>"}\n'; exit 1; }
+  DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  export OMARCHY_JELLYFIN_CONFIG="$CFG"
+  exec python3 "$DIR/control.py" "$2" "$3"
+fi
+
 # web_base is the address for BROWSER links; url stays the API endpoint. Separating
 # them keeps polling on the fast LAN path instead of crossing the public edge
 # (Traefik + geoblock + CrowdSec + rate-limit) 8,640 times a day, while a click still
@@ -71,4 +82,9 @@ case "$CODE" in
 esac
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-printf '%s' "$JSON" | python3 "$DIR/flatten.py" "$WEB_BASE" || fail "bad response"
+# Two bases, deliberately: WEB_BASE builds the click-through link that has to work
+# from anywhere, URL builds the poster link that must stay on the LAN. Sending
+# artwork through the public edge would put an image request per stream per poll
+# across Traefik + geoblock + CrowdSec, to fetch something only ever displayed at
+# home.
+printf '%s' "$JSON" | python3 "$DIR/flatten.py" "$WEB_BASE" "$URL" || fail "bad response"
