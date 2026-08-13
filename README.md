@@ -127,6 +127,19 @@ one-click action with no side effects.
 | `backend-config.test.sh` | `bash backend-config.test.sh` — config parsing against a stub server |
 | `jellyfin.png` / `.svg` | Bar icon and popup header mark |
 
+## Preview image
+
+`preview.png` shows *Night of the Living Dead* (1968), which is in the public domain in the US — its
+original release prints omitted the copyright notice, so neither the film nor its poster art is under
+copyright. The poster is the 1968 one-sheet from
+[Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Night_Of_The_Living_Dead_(1968)_-_Poster.jpg),
+also public domain.
+
+Everything identifying is a placeholder: `demo` for the viewer, `Living Room` for the device, and a
+generic `1080p - H264 - SDR` in place of the real stream label — that line otherwise carries the
+release-group tag from the actual file, which has no business in a published screenshot. No real
+library metadata is reproduced anywhere in this repository.
+
 ## Credits and trademarks
 
 Icon from [dashboard-icons](https://github.com/homarr-labs/dashboard-icons) (`jellyfin.svg`,
