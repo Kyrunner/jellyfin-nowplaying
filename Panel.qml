@@ -73,14 +73,17 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
-    // Our own mark (see make_icon.py): Jellyfin's visual language — bell, tentacles,
-    // purple->blue gradient — with a play triangle so the icon says "playing".
+    // The official Jellyfin mark, from dashboard-icons. Replaces a hand-drawn
+    // jellyfish-with-play-triangle: the real logo is a rounded triangle, not a
+    // jellyfish, so it is also harder to confuse with the Seerr orb sitting beside
+    // it. "Playing" is already carried by the widget being visible at all — it
+    // hides when idle — so the icon does not need to say it twice.
     // BarIconButton renders `iconComponent` through a Loader when it is non-null and
     // hides the glyph Text, so `text` must stay empty or both would count as content.
     text: ""
     iconComponent: Component {
       Image {
-        source: Qt.resolvedUrl("nowplaying.png")
+        source: Qt.resolvedUrl("jellyfin.png")
         // Render at 2x the slot and downscale: the mark is 512px, and letting Image
         // scale a large source directly leaves it soft on a HiDPI bar.
         sourceSize.width: 64
@@ -127,13 +130,29 @@ Panel {
           width: parent.width
           spacing: Style.space(10)
 
-          Text {
+          // The bar gives each widget ONE fixed square slot, so the popup header is
+          // where the mark gets to sit beside its name. SVG here because it is
+          // rendered larger than the bar icon and scales without a second asset.
+          RowLayout {
             Layout.fillWidth: true
-            text: "Jellyfin"
-            color: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.title
-            font.bold: true
+            spacing: Style.space(6)
+            Image {
+              source: Qt.resolvedUrl("jellyfin.svg")
+              Layout.preferredWidth: Style.space(20)
+              Layout.preferredHeight: Style.space(20)
+              sourceSize.width: 40
+              sourceSize.height: 40
+              fillMode: Image.PreserveAspectFit
+              smooth: true
+            }
+            Text {
+              text: "Jellyfin"
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.title
+              font.bold: true
+            }
+            Item { Layout.fillWidth: true }
           }
 
           // Fault state, worded

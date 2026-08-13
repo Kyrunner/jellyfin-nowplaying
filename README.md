@@ -123,7 +123,20 @@ one-click action with no side effects.
 | `Panel.qml` | Bar button + popout. Presentation only |
 | `Readiness.qml` / `.js` | When to poll, and when a failure is old enough to be worth showing. The logic is a pure function so it can be tested without a bar or a reboot |
 | `Readiness.test.js` | `node Readiness.test.js` — the grace-window decision table |
+| `control.py` | One command to one session. Separate route for transport vs general commands |
 | `backend-config.test.sh` | `bash backend-config.test.sh` — config parsing against a stub server |
+| `jellyfin.png` / `.svg` | Bar icon and popup header mark |
+
+## Credits and trademarks
+
+Icon from [dashboard-icons](https://github.com/homarr-labs/dashboard-icons) (`jellyfin.svg`,
+`jellyfin.png`), licensed **Apache-2.0**. It replaced a hand-drawn jellyfish-with-play-triangle:
+Jellyfin's real mark is a rounded triangle, not a jellyfish, which also makes it harder to confuse
+with the Seerr orb sitting beside it in the same bar. "Playing" is carried by the widget being
+visible at all — it hides when idle — so the icon does not need to say it a second time.
+
+The Jellyfin name and logo are trademarks of the Jellyfin project, used here for identification
+only. This plugin is not affiliated with or endorsed by it. Plugin code is MIT — see `LICENSE`.
 
 ## Transport controls
 
