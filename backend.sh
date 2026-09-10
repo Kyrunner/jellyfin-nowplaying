@@ -5,26 +5,28 @@
 # so it can be run and diffed over SSH — the widget itself can only be checked by
 # eye on the owner's screen.
 #
-#   {"ok":true,"streams":[{...}]}          nothing playing -> streams: []
-#   {"ok":false,"error":"not configured"}  and a non-zero exit
+#   {"ok":true,"streams":[{...}],"endpoint":"lan"}   nothing playing -> streams: []
+#   {"ok":false,"error":"not configured"}            and a non-zero exit
 #
-# Config: ~/.config/omarchy-jellyfin/config.json  {"url":"http://host:8095","token":"..."}
+# Config: ~/.config/omarchy-jellyfin/config.json
+#   {"url":"http://host:8095","token":"...","web_base":"https://jf.example.com",
+#    "public_url":"https://jf.example.com"}
 set -uo pipefail
 
 CFG="${OMARCHY_JELLYFIN_CONFIG:-$HOME/.config/omarchy-jellyfin/config.json}"
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export OMARCHY_JELLYFIN_CONFIG="$CFG"
 
 fail() { printf '{"ok":false,"error":"%s","streams":[]}\n' "$1"; exit 1; }
 
 [ -r "$CFG" ] || fail "not configured"
 
-# Transport is a separate entry point so the poll path stays exactly as it was: the
-# widget polls thousands of times a day and controls a handful of times, and a shared
-# code path would make every poll carry the command plumbing. The token reaches the
-# helper through the config file PATH, never argv, so it stays out of `ps`.
+# Transport is a separate entry point. The token reaches the helper through the
+# config file PATH, never argv, so it stays out of `ps`. Both the poll and the
+# controls go through jellyfin.py, so a command sent away from home follows the
+# same LAN-then-public choice as the poll that showed the stream.
 if [ "${1:-poll}" = "control" ]; then
   [ $# -eq 3 ] || { printf '{"ok":false,"error":"usage: control <session_id> <action>"}\n'; exit 1; }
-  DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  export OMARCHY_JELLYFIN_CONFIG="$CFG"
   exec python3 "$DIR/control.py" "$2" "$3"
 fi
 
@@ -32,6 +34,10 @@ fi
 # them keeps polling on the fast LAN path instead of crossing the public edge
 # (Traefik + geoblock + CrowdSec + rate-limit) 8,640 times a day, while a click still
 # opens somewhere reachable away from home. Falls back to url when unset.
+#
+# public_url is the API address tried only when url is unreachable, so the widget
+# keeps working away from home. It defaults to web_base: the public web UI is the
+# same Jellyfin, and it serves the API too. Set it to "" to never leave the LAN.
 #
 # One field per line, and read one at a time. A space-separated
 # `read -r A B C` collapses runs of whitespace, so an empty middle field does
@@ -41,50 +47,22 @@ fi
 # "auth failed" — a credential problem the user did not have, while the real
 # fault went unnamed. None of these values may contain a newline, so
 # line-delimiting is unambiguous.
-FIELDS=$(python3 - "$CFG" <<'PY'
-import json, sys
-try:
-    c = json.load(open(sys.argv[1]))
-except Exception:
-    sys.exit(1)
-if not isinstance(c, dict):
-    sys.exit(1)
-url = str(c.get("url") or "").strip().rstrip("/")
-# Stripped because a key pasted from Jellyfin's dashboard often carries a
-# trailing newline, which the server rejects as an invalid token.
-token = str(c.get("token") or "").strip()
-web_base = (str(c.get("web_base") or "").strip().rstrip("/")) or url
-print(url)
-print(token)
-print(web_base)
-PY
-) || fail "bad config"
+FIELDS=$(python3 "$DIR/jellyfin.py" config) || fail "bad config"
 
-{ IFS= read -r URL; IFS= read -r TOKEN; IFS= read -r WEB_BASE; } <<<"$FIELDS"
+{ IFS= read -r URL; IFS= read -r TOKEN; IFS= read -r WEB_BASE; IFS= read -r PUBLIC_URL; } <<<"$FIELDS"
 
 # Guarded individually, so a missing field is reported as the config error it is.
 [ -n "${URL:-}" ] || fail "bad config"
 [ -n "${TOKEN:-}" ] || fail "bad config"
 
-# -m keeps a hung server from wedging the poll; %{http_code} separates auth from reachability
-BODY=$(curl -s -m 8 -w $'\n%{http_code}' \
-  -H "Authorization: MediaBrowser Token=\"$TOKEN\"" \
-  "$URL/Sessions" 2>/dev/null) || fail "unreachable"
+# Three lines back: which endpoint answered, its base, then the /Sessions body.
+# On failure jellyfin.py prints the {"ok":false,...} line itself and exits 1.
+OUT=$(python3 "$DIR/jellyfin.py" sessions) || { printf '%s\n' "$OUT"; exit 1; }
+{ IFS= read -r ENDPOINT; IFS= read -r API_BASE; } <<<"$OUT"
+JSON=$(printf '%s\n' "$OUT" | sed '1,2d')
 
-CODE=$(printf '%s' "$BODY" | tail -n1)
-JSON=$(printf '%s' "$BODY" | sed '$d')
-
-case "$CODE" in
-  200) : ;;
-  401|403) fail "auth failed" ;;
-  000|"") fail "unreachable" ;;
-  *) fail "http $CODE" ;;
-esac
-
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Two bases, deliberately: WEB_BASE builds the click-through link that has to work
-# from anywhere, URL builds the poster link that must stay on the LAN. Sending
-# artwork through the public edge would put an image request per stream per poll
-# across Traefik + geoblock + CrowdSec, to fetch something only ever displayed at
-# home.
-printf '%s' "$JSON" | python3 "$DIR/flatten.py" "$WEB_BASE" "$URL" || fail "bad response"
+# from anywhere, API_BASE builds the poster link. At home that is the LAN address,
+# so artwork never crosses the public edge to be displayed on the couch; away from
+# home it is the public one, which is the only place a poster can load from.
+printf '%s' "$JSON" | python3 "$DIR/flatten.py" "$WEB_BASE" "$API_BASE" "$ENDPOINT" || fail "bad response"

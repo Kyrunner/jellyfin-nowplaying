@@ -13,6 +13,7 @@ set -u
 PLUGIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK="$(mktemp -d)"
 trap 'kill ${STUB_PID:-} 2>/dev/null; rm -rf "$WORK"' EXIT
+export XDG_STATE_HOME="$WORK/state"   # keep the endpoint memory out of the real one
 
 PORT="${JELLYFIN_TEST_PORT:-8792}"
 GOOD_TOKEN="realtoken-abcdef0123456789"
@@ -38,6 +39,16 @@ class H(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def do_POST(self):
+        auth = self.headers.get("Authorization", "")
+        m = re.search(r'Token="([^"]*)"', auth)
+        got = m.group(1) if m else ""
+        with open(LOG, "w") as f:
+            f.write(got)
+        self.send_response(204 if got == TOKEN else 401)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def log_message(self, *a):
         pass
 
@@ -54,11 +65,12 @@ done
 pass=0
 fail=0
 
-run() { # name, expected-substring, config-json ("" means no config file at all)
+run() { # name, expected-substring, config-json ("" means no config file at all), [backend args...]
   local name="$1" want="$2" cfg="$3" out
+  shift 3
   rm -f "$WORK/seen-token.txt"
   if [ -z "$cfg" ]; then rm -f "$WORK/config.json"; else printf '%s' "$cfg" >"$WORK/config.json"; fi
-  out=$(OMARCHY_JELLYFIN_CONFIG="$WORK/config.json" "$PLUGIN/backend.sh" 2>&1)
+  out=$(OMARCHY_JELLYFIN_CONFIG="$WORK/config.json" "$PLUGIN/backend.sh" "$@" 2>&1)
   if [[ "$out" == *"$want"* ]]; then
     pass=$((pass + 1)); printf '  ok    %s\n' "$name"
   else
@@ -91,6 +103,34 @@ fi
 run "token pasted with stray whitespace" '"ok":true' "{\"url\":\"$U\",\"token\":\"  $GOOD_TOKEN \\n\"}"
 run "web_base absent falls back to url"  '"ok":true' "{\"url\":\"$U\",\"token\":\"$GOOD_TOKEN\"}"
 run "trailing slash on url"              '"ok":true' "{\"url\":\"$U/\",\"token\":\"$GOOD_TOKEN\"}"
+
+# Nothing listens on port 1, so the LAN address fails fast and deterministically.
+DEAD="http://127.0.0.1:1"
+ENDPOINT="$WORK/state/omarchy-jellyfin/endpoint.json"
+
+echo "endpoint fallback:"
+rm -f "$ENDPOINT"
+run "LAN dead, public_url answers" '"endpoint":"public"' "{\"url\":\"$DEAD\",\"token\":\"$GOOD_TOKEN\",\"public_url\":\"$U\"}"
+if grep -q '"which": *"public"' "$ENDPOINT" 2>/dev/null; then
+  pass=$((pass + 1)); echo "  ok    the public choice is remembered for the next poll"
+else
+  fail=$((fail + 1)); echo "  FAIL  endpoint.json does not record the public choice: $(cat "$ENDPOINT" 2>/dev/null)"
+fi
+run "a control follows the same fallback" '"ok": true' "{\"url\":\"$DEAD\",\"token\":\"$GOOD_TOKEN\",\"public_url\":\"$U\"}" control sess1 playpause
+if [ "$(cat "$WORK/seen-token.txt" 2>/dev/null)" = "$GOOD_TOKEN" ]; then
+  pass=$((pass + 1)); echo "  ok    the control carried the configured token"
+else
+  fail=$((fail + 1)); echo "  FAIL  control sent '$(cat "$WORK/seen-token.txt" 2>/dev/null)'"
+fi
+rm -f "$ENDPOINT"
+run "public_url defaults to web_base" '"endpoint":"public"' "{\"url\":\"$DEAD\",\"token\":\"$GOOD_TOKEN\",\"web_base\":\"$U\"}"
+rm -f "$ENDPOINT"
+run "LAN alive is reported as lan"  '"endpoint":"lan"' "{\"url\":\"$U\",\"token\":\"$GOOD_TOKEN\",\"public_url\":\"$DEAD\"}"
+run "no public_url: LAN dead is still unreachable" '"error":"unreachable"' "{\"url\":\"$DEAD\",\"token\":\"$GOOD_TOKEN\"}"
+run "public_url set to empty never leaves the LAN" '"error":"unreachable"' "{\"url\":\"$DEAD\",\"token\":\"$GOOD_TOKEN\",\"web_base\":\"$U\",\"public_url\":\"\"}"
+# A wrong token must never fail over: retrying bad credentials against a public
+# edge is how you get banned by your own rate limiter.
+run "a wrong token does not fail over" '"error":"auth failed"' "{\"url\":\"$U\",\"token\":\"nope\",\"public_url\":\"$DEAD\"}"
 
 echo
 if [ "$fail" -eq 0 ]; then

@@ -152,6 +152,15 @@ Panel {
               font.pixelSize: Style.font.title
               font.bold: true
             }
+            // Worth stating rather than leaving a mystery: on the public path
+            // the widget is reaching Jellyfin from outside the LAN.
+            Text {
+              visible: jf.endpoint === "public"
+              text: "remote"
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
             Item { Layout.fillWidth: true }
           }
 

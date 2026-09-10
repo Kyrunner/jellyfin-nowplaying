@@ -37,7 +37,8 @@ mkdir -p ~/.config/omarchy-jellyfin
 cat > ~/.config/omarchy-jellyfin/config.json <<'EOF'
 { "url": "http://<jellyfin-host>:8095",
   "token": "<dedicated jellyfin api key>",
-  "web_base": "https://<public-jellyfin-url>" }
+  "web_base": "https://<public-jellyfin-url>",
+  "public_url": "https://<public-jellyfin-url>" }
 EOF
 chmod 600 ~/.config/omarchy-jellyfin/config.json
 
@@ -51,6 +52,12 @@ omarchy-restart-shell
 
 - **`web_base` is optional** but drives the click-through; without it the title links to `url` (the LAN address),
   which won't resolve off-network.
+- **`public_url` is optional** and is the API fallback: used only when `url` is unreachable, so the widget keeps
+  working away from home. It defaults to `web_base`; set it to `""` if Jellyfin must never be polled from outside
+  the LAN. The LAN address is always tried first — at 10s polling this widget makes ~8,640 requests a day, and
+  pointing that at a public edge with a rate limiter or an IP-ban daemon is how you lock yourself out of your own
+  server. After a fallback it stays on the public endpoint for 10 minutes, then re-probes the LAN, so coming home
+  restores the fast path on its own. The popup shows `remote` while on that path. A wrong token never fails over.
 - ⛔ **A bar widget goes in `bar.layout.right`, NOT the top-level `plugins[]` array.** That array is for overlay
   plugins (`cliamp`, `wallpaper-engine`); a bar widget listed there silently never appears. Put the entry in
   `bar.layout.right` alongside your other bar items, e.g. between `omarchy.tray` and a VPN widget.
@@ -194,7 +201,7 @@ Two decisions worth keeping:
 - **No credential is attached to the image URL.** Jellyfin serves `/Items/<id>/Images/*`
   unauthenticated, which is what makes it safe to hand the URL straight to QML's `Image`. Appending
   `api_key=` would work too, and would put a live token into QML and into anything that logs it.
-- **Posters load over the LAN `url`, not `web_base`.** `backend.sh` passes both: `web_base` builds
+- **Posters load over the API address that answered, not `web_base`.** `backend.sh` passes both: `web_base` builds
   the click-through link that must work from anywhere, `url` builds the poster link. Otherwise every
   poll would drag artwork through the public edge to display it at home.
 

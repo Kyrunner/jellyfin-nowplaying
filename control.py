@@ -13,17 +13,12 @@ rather than string-joined into one path.
 """
 
 import json
-import os
 import sys
 import urllib.error
 import urllib.parse
-import urllib.request
 
-CONFIG_PATH = os.environ.get(
-    "OMARCHY_JELLYFIN_CONFIG", os.path.expanduser("~/.config/omarchy-jellyfin/config.json")
-)
+import jellyfin
 
-TIMEOUT = 8.0
 SEEK_SECONDS = 30
 TICKS_PER_SEC = 10_000_000
 
@@ -49,34 +44,19 @@ def fail(msg):
 
 
 def load_config():
-    try:
-        with open(CONFIG_PATH) as fh:
-            cfg = json.load(fh)
-    except FileNotFoundError:
-        raise ValueError("not configured")
-    except Exception:
+    cfg = jellyfin.load_config()
+    if not cfg["url"] or not cfg["token"]:
         raise ValueError("bad config")
-    if not isinstance(cfg, dict):
-        raise ValueError("bad config")
-    url = str(cfg.get("url") or "").strip().rstrip("/")
-    token = str(cfg.get("token") or "").strip()
-    if not url or not token:
-        raise ValueError("bad config")
-    return url, token
+    return cfg
 
 
-def post(url, token, path):
-    req = urllib.request.Request(
-        url + path,
-        data=b"",
-        headers={'Authorization': 'MediaBrowser Token="%s"' % token},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
-        return r.status
+def post(cfg, path):
+    # Same LAN-then-public road as the poll, so a button pressed away from home
+    # reaches the same Jellyfin the popup is showing.
+    jellyfin.request(cfg, path, method="POST")
 
 
-def session_position_ticks(url, token, session_id):
+def session_position_ticks(cfg, session_id):
     """Current PositionTicks for one session, for relative seeking.
 
     Jellyfin's Seek endpoint is ABSOLUTE only, so a 30s skip has to be computed from
@@ -84,11 +64,7 @@ def session_position_ticks(url, token, session_id):
     is up to one poll interval stale, and seeking from a stale base would drift by
     however long ago the last poll was.
     """
-    req = urllib.request.Request(
-        url + "/Sessions", headers={'Authorization': 'MediaBrowser Token="%s"' % token}
-    )
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
-        sessions = json.load(r)
+    sessions = jellyfin.request(cfg, "/Sessions") or []
     for s in sessions:
         if s.get("Id") != session_id:
             continue
@@ -109,31 +85,31 @@ def main(argv):
     session_id, action = argv
 
     try:
-        url, token = load_config()
+        cfg = load_config()
     except ValueError as e:
         return fail(e)
 
     try:
         if action in PLAYING:
-            post(url, token, "/Sessions/%s/Playing/%s" % (session_id, PLAYING[action]))
+            post(cfg, "/Sessions/%s/Playing/%s" % (session_id, PLAYING[action]))
         elif action in COMMAND:
-            post(url, token, "/Sessions/%s/Command/%s" % (session_id, COMMAND[action]))
+            post(cfg, "/Sessions/%s/Command/%s" % (session_id, COMMAND[action]))
         elif action in ("back30", "fwd30"):
-            pos, runtime = session_position_ticks(url, token, session_id)
+            pos, runtime = session_position_ticks(cfg, session_id)
             delta = SEEK_SECONDS * TICKS_PER_SEC * (1 if action == "fwd30" else -1)
             target = max(0, pos + delta)
             if runtime:
                 # Seeking past the end is how you make a client stop dead rather than
                 # advance; clamp just short of it instead.
                 target = min(target, max(0, runtime - TICKS_PER_SEC))
-            post(url, token,
+            post(cfg,
                  "/Sessions/%s/Playing/Seek?%s" % (
                      session_id, urllib.parse.urlencode({"seekPositionTicks": target})))
         else:
             return fail("unknown action %r" % action)
+    except jellyfin.AuthError:
+        return fail("auth failed")
     except urllib.error.HTTPError as e:
-        if e.code in (401, 403):
-            return fail("auth failed")
         if e.code == 404:
             return fail("that session is gone")
         return fail("http %d" % e.code)

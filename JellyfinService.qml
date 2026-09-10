@@ -14,6 +14,7 @@ Item {
   property string error: "starting"
   property var streams: []
   property bool stale: false          // last poll failed but we still have old data
+  property string endpoint: ""        // "lan" or "public": which address answered
 
   // True only once a failure has persisted past the grace window, or when the
   // problem is a configuration one, which is never transient. Panels render
@@ -52,6 +53,7 @@ Item {
           svc.error = d.error ? String(d.error) : ""
           if (d.ok) {
             svc.streams = d.streams || []; svc.stale = false; svc.tick = 0
+            svc.endpoint = d.endpoint ? String(d.endpoint) : ""
             readiness.succeeded()
           } else {
             svc.stale = svc.count > 0   // keep last-known, mark it stale

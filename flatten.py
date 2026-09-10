@@ -14,6 +14,9 @@ BASE = (sys.argv[1].rstrip('/') if len(sys.argv) > 1 else '')
 # they should not cross the public edge to do it. Falls back to BASE when unset so an
 # older backend.sh keeps working.
 API_BASE = (sys.argv[2].rstrip('/') if len(sys.argv) > 2 and sys.argv[2] else BASE)
+# argv[3] = which endpoint answered ("lan" / "public"), reported so the popup can
+# say when it is reaching Jellyfin from outside the LAN.
+ENDPOINT = (sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] else "lan")
 
 # 180px tall is ~2x the rendered thumbnail on a HiDPI bar. Asking Jellyfin to resize
 # means ~12KB per poster instead of a multi-megabyte original, and Jellyfin caches
@@ -144,4 +147,4 @@ for s in sessions:
 
     streams.append(entry)
 
-print(json.dumps({"ok":True,"error":None,"streams":streams}, separators=(",",":")))
+print(json.dumps({"ok":True,"error":None,"streams":streams,"endpoint":ENDPOINT}, separators=(",",":")))
