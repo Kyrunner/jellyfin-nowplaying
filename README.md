@@ -53,8 +53,9 @@ omarchy-restart-shell
 - **`web_base` is optional** but drives the click-through; without it the title links to `url` (the LAN address),
   which won't resolve off-network.
 - **`public_url` is optional** and is the API fallback: used only when `url` is unreachable, so the widget keeps
-  working away from home. It defaults to `web_base`; set it to `""` if Jellyfin must never be polled from outside
-  the LAN. The LAN address is always tried first — at 10s polling this widget makes ~8,640 requests a day, and
+  working away from home. It must be `https://`: the token is never sent to a public address over plain HTTP,
+  never follows a redirect, and replies over 4 MiB are refused. It defaults to `web_base`; set it to `""` if
+  Jellyfin must never be polled from outside the LAN. The LAN address is always tried first — at 10s polling this widget makes ~8,640 requests a day, and
   pointing that at a public edge with a rate limiter or an IP-ban daemon is how you lock yourself out of your own
   server. After a fallback it stays on the public endpoint for 10 minutes, then re-probes the LAN, so coming home
   restores the fast path on its own. The popup shows `remote` while on that path. A wrong token never fails over.

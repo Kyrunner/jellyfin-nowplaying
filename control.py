@@ -109,6 +109,8 @@ def main(argv):
             return fail("unknown action %r" % action)
     except jellyfin.AuthError:
         return fail("auth failed")
+    except jellyfin.EndpointRefused as e:
+        return fail(e)
     except urllib.error.HTTPError as e:
         if e.code == 404:
             return fail("that session is gone")

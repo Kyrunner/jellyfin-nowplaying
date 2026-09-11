@@ -21,6 +21,7 @@ import os
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 CONFIG = os.environ.get("OMARCHY_JELLYFIN_CONFIG") or os.path.expanduser(
@@ -38,11 +39,32 @@ PUBLIC_STICKY_SEC = 600
 LAN_TIMEOUT = 2.5
 PUBLIC_TIMEOUT = 10
 
+# A reply is read up to this many bytes and no further. /Sessions for a busy
+# server is tens of KB; anything past this is not Jellyfin answering us.
+MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+
 
 class AuthError(Exception):
     """Bad credentials. Deliberately never triggers endpoint failover: retrying a
     wrong token against a public edge is how you get banned by your own rate
     limiter."""
+
+
+class EndpointRefused(Exception):
+    """The endpoint is not one the token may be sent to, or its reply is not one we
+    will parse. The message is what the widget shows."""
+
+
+class _NoRedirects(urllib.request.HTTPRedirectHandler):
+    """urllib copies request headers onto a redirected request, so following a 3xx
+    would replay the Authorization header to wherever Location points. Returning
+    None makes the redirect surface as an HTTPError instead."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirects)
 
 
 def load_config():
@@ -94,16 +116,26 @@ def _save_json(path, data):
         pass  # remembering the endpoint is an optimisation, never a requirement
 
 
-def _call(base, token, path, method, timeout):
+def _call(which, base, token, path, method, timeout):
+    url = base + path
+    # The LAN address may be plain HTTP on a trusted network; the public one
+    # carries the token across the internet and must be HTTPS.
+    if which == "public" and urllib.parse.urlsplit(url).scheme != "https":
+        raise EndpointRefused("public_url must be https")
     req = urllib.request.Request(
-        base + path,
+        url,
         data=b"" if method == "POST" else None,
         headers={'Authorization': 'MediaBrowser Token="%s"' % token},
         method=method,
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            raw = r.read().decode("utf-8")
+        with _OPENER.open(req, timeout=timeout) as r:
+            if r.geturl() != url:
+                raise EndpointRefused("redirected")
+            raw = r.read(MAX_RESPONSE_BYTES + 1)
+            if len(raw) > MAX_RESPONSE_BYTES:
+                raise EndpointRefused("response too large")
+            raw = raw.decode("utf-8")
             return json.loads(raw) if raw.strip() else None
     except urllib.error.HTTPError as e:
         if e.code in (401, 403):
@@ -125,7 +157,7 @@ def request(cfg, path, method="GET"):
     """
     global _chosen
     if _chosen:
-        return _call(_chosen[1], cfg["token"], path, method, _chosen[2])
+        return _call(_chosen[0], _chosen[1], cfg["token"], path, method, _chosen[2])
 
     lan, public = cfg["url"], cfg["public_url"]
     state = _load_json(ENDPOINT_FILE, {})
@@ -141,7 +173,7 @@ def request(cfg, path, method="GET"):
     last = None
     for which, base, tmo in order:
         try:
-            result = _call(base, cfg["token"], path, method, tmo)
+            result = _call(which, base, cfg["token"], path, method, tmo)
             _chosen = (which, base, tmo)
             if which != state.get("which") or which == "public":
                 _save_json(ENDPOINT_FILE, {"which": which, "since": time.time()})
@@ -196,6 +228,8 @@ def _main(argv):
             sessions = request(cfg, "/Sessions")
         except AuthError:
             return _fail("auth failed")
+        except EndpointRefused as e:
+            return _fail(str(e))
         except urllib.error.HTTPError as e:
             return _fail("http %d" % e.code)
         except Exception:
