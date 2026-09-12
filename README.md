@@ -92,11 +92,12 @@ Expected shapes:
 `bad config` and `auth failed` are kept strictly apart. A config mistake reported as an auth failure sends you
 to Dashboard → API Keys, where everything looks correct, while the real fault goes unnamed.
 
-The two suites run with no server and no credentials:
+The three suites run with no server and no credentials:
 
 ```bash
 node Readiness.test.js          # the grace-window decision table
 bash backend-config.test.sh     # config parsing, against a stub Jellyfin on localhost
+bash state-write-safety.test.sh # what the state writes refuse to follow
 ```
 
 ## Requirements
@@ -133,6 +134,7 @@ one-click action with no side effects.
 | `Readiness.test.js` | `node Readiness.test.js` — the grace-window decision table |
 | `control.py` | One command to one session. Separate route for transport vs general commands |
 | `backend-config.test.sh` | `bash backend-config.test.sh` — config parsing against a stub server |
+| `state-write-safety.test.sh` | `bash state-write-safety.test.sh` — state writes never follow a planted symlink and refuse a state directory others can write |
 | `jellyfin.png` / `.svg` | Bar icon and popup header mark |
 
 ## Preview image

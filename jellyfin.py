@@ -18,6 +18,7 @@ out of `ps`.
 
 import json
 import os
+import stat
 import sys
 import time
 import urllib.error
@@ -97,23 +98,77 @@ def load_config():
     return {"url": url, "token": token, "web_base": web_base, "public_url": public_url}
 
 
-def _load_json(path, default):
+def _state_dir_fd():
+    """A descriptor for the state directory, or an exception.
+
+    Every state read and write goes through this one descriptor rather than
+    through a path, so the directory cannot be swapped for another between the
+    check below and the operation that trusts it. O_NOFOLLOW means a symlink
+    standing where the directory should be is an error, not a redirect.
+    """
+    os.makedirs(STATE_DIR, mode=0o700, exist_ok=True)
+    fd = os.open(STATE_DIR, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        with open(path) as f:
+        st = os.fstat(fd)
+        if st.st_uid != os.getuid():
+            raise PermissionError("state directory is not ours")
+        if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            # Anyone who can write here can plant the file we are about to open.
+            raise PermissionError("state directory is writable by others")
+    except Exception:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _load_json(path, default):
+    dfd = None
+    try:
+        dfd = _state_dir_fd()
+        fd = os.open(os.path.basename(path), os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dfd)
+        with os.fdopen(fd) as f:
             return json.load(f)
     except Exception:
         return default
+    finally:
+        if dfd is not None:
+            os.close(dfd)
 
 
 def _save_json(path, data):
+    """Publish state atomically, without trusting anything already on disk.
+
+    The temp name is random and created with O_EXCL, so a file already sitting
+    at that name is a failure rather than something to write through; O_NOFOLLOW
+    means a symlink there is never followed. Without both, the predictable
+    "<file>.tmp" name let anything that could write this directory choose which
+    file the poll truncated.
+    """
+    name = os.path.basename(path)
+    dfd = None
+    tmp = None
     try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        tmp = path + ".tmp"
-        with open(tmp, "w") as f:
+        dfd = _state_dir_fd()
+        tmp = ".%s.%s.tmp" % (name, os.urandom(8).hex())
+        fd = os.open(
+            tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dfd
+        )
+        with os.fdopen(fd, "w") as f:
             json.dump(data, f)
-        os.replace(tmp, path)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, name, src_dir_fd=dfd, dst_dir_fd=dfd)
+        tmp = None
     except Exception:
         pass  # remembering the endpoint is an optimisation, never a requirement
+    finally:
+        if dfd is not None:
+            if tmp is not None:
+                try:
+                    os.unlink(tmp, dir_fd=dfd)
+                except OSError:
+                    pass
+            os.close(dfd)
 
 
 def _call(which, base, token, path, method, timeout):
