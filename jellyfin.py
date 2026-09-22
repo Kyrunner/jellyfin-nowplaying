@@ -98,17 +98,69 @@ def load_config():
     return {"url": url, "token": token, "web_base": web_base, "public_url": public_url}
 
 
+def _open_dir_at(parent_fd, name, create):
+    """Open one path component relative to its parent's descriptor.
+
+    O_NOFOLLOW makes a symlink at this component an error rather than a
+    redirect; creating with mkdir(dir_fd=...) means a missing component is made
+    inside the directory we already hold, not wherever the path now points.
+    """
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    try:
+        return os.open(name, flags, dir_fd=parent_fd)
+    except FileNotFoundError:
+        if not create:
+            raise
+        try:
+            os.mkdir(name, 0o700, dir_fd=parent_fd)
+        except FileExistsError:
+            pass  # raced with another run of ourselves; the open below re-checks it
+        return os.open(name, flags, dir_fd=parent_fd)
+
+
+def _check_ancestor(fd):
+    """A directory above the state directory must be one nobody else can swap
+    our path out of: owned by root or by us, and not writable by others --
+    unless it is root-owned and sticky (/tmp), where others may add entries
+    but cannot rename or remove ours.
+    """
+    st = os.fstat(fd)
+    if st.st_uid not in (0, os.getuid()):
+        raise PermissionError("a directory above the state directory is not ours")
+    if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        if not (st.st_uid == 0 and st.st_mode & stat.S_ISVTX):
+            raise PermissionError("a directory above the state directory is writable by others")
+
+
 def _state_dir_fd():
     """A descriptor for the state directory, or an exception.
 
-    Every state read and write goes through this one descriptor rather than
-    through a path, so the directory cannot be swapped for another between the
-    check below and the operation that trusts it. O_NOFOLLOW means a symlink
-    standing where the directory should be is an error, not a redirect.
+    The directory is reached by walking its absolute path one component at a
+    time from "/", each opened O_NOFOLLOW relative to the descriptor of the one
+    before and owner-checked before the walk continues. No component is ever
+    looked up by path, so a symlink swapped in anywhere along it -- including
+    ~/.local/state itself -- is refused instead of followed, and nothing can be
+    renamed out from under a directory we have already checked.
+
+    Every state read and write then goes through the returned descriptor, so
+    the state directory cannot be swapped between this check and its use.
     """
-    os.makedirs(STATE_DIR, mode=0o700, exist_ok=True)
-    fd = os.open(STATE_DIR, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    path = os.path.abspath(STATE_DIR)
+    parts = [p for p in path.split(os.sep) if p]
+    if not parts:
+        raise PermissionError("state directory cannot be /")
+    fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
     try:
+        _check_ancestor(fd)
+        for i, name in enumerate(parts):
+            if name in (".", ".."):
+                raise PermissionError("state path is not normalised")
+            last = i == len(parts) - 1
+            nfd = _open_dir_at(fd, name, create=True)
+            os.close(fd)
+            fd = nfd
+            if not last:
+                _check_ancestor(fd)
         st = os.fstat(fd)
         if st.st_uid != os.getuid():
             raise PermissionError("state directory is not ours")
