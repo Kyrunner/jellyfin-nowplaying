@@ -146,6 +146,7 @@ Panel {
               smooth: true
             }
             Text {
+              textFormat: Text.PlainText
               text: "Jellyfin"
               color: root.foreground
               font.family: root.fontFamily
@@ -155,6 +156,7 @@ Panel {
             // Worth stating rather than leaving a mystery: on the public path
             // the widget is reaching Jellyfin from outside the LAN.
             Text {
+              textFormat: Text.PlainText
               visible: jf.endpoint === "public"
               text: "remote"
               color: root.dim
@@ -166,6 +168,7 @@ Panel {
 
           // Fault state, worded
           Text {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             visible: jf.faulted
             text: "Not available — " + jf.error + (jf.stale ? " (showing last known)" : "")
@@ -177,6 +180,7 @@ Panel {
           // Both config faults get a next step. "bad config" means the file is
           // there but unusable, which is a different fix from "write one".
           Text {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             visible: jf.faulted
                      && (jf.error === "not configured" || jf.error === "bad config")
@@ -191,6 +195,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             visible: jf.ok && jf.count === 0
             text: "Nobody is watching."
@@ -240,6 +245,7 @@ Panel {
               // backend, so QML never needs to know the server address or the route.
               Text {
                 id: titleText
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: modelData.title
                 color: titleMouse.containsMouse && modelData.web_url ? root.urgent : root.foreground
@@ -261,6 +267,7 @@ Panel {
                 }
               }
               Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: modelData.user + " · " + modelData.device + " · " + modelData.client
                 color: root.dim
@@ -272,6 +279,7 @@ Panel {
               // in one line — and it is the ONLY source for FEL vs MEL, since Jellyfin
               // reports DOVIWithEL for both.
               Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 visible: !!modelData.video_label
                 text: modelData.video_label || ""
@@ -283,6 +291,7 @@ Panel {
 
               // What the server is doing right now: direct play vs transcode
               Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: {
                   var br = modelData.bitrate_mbps ? modelData.bitrate_mbps + " Mb/s" : "bitrate n/a"
@@ -315,6 +324,7 @@ Panel {
                 }
               }
               Text {
+                textFormat: Text.PlainText
                 // What he asked for: total runtime + how much is LEFT, counting down
                 // live. Elapsed is already conveyed by the bar above, so it is not
                 // repeated here.
@@ -424,6 +434,7 @@ Panel {
 
               // Why the buttons are dead, stated rather than left to be guessed.
               Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 visible: !modelData.controllable
                 text: modelData.control_error
@@ -439,6 +450,7 @@ Panel {
           // A failed command, named. Sits below the streams so one message covers
           // whichever session it came from.
           Text {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             visible: jf.actionError !== ""
             text: "Command failed — " + jf.actionError
