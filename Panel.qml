@@ -72,6 +72,8 @@ Panel {
   BarIconButton {
     id: button
     anchors.fill: parent
+    // A zero-width slot still paints its icon over the neighbours in 4.5.
+    visible: root.implicitWidth > 0
     bar: root.bar
     // The official Jellyfin mark, from dashboard-icons. Replaces a hand-drawn
     // jellyfish-with-play-triangle: the real logo is a rounded triangle, not a
